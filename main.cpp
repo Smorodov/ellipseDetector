@@ -5,11 +5,42 @@
 #include <set>
 #include <vector>
 
-
-using namespace std;
-using namespace cv;
 cv::Mat global_dbg_img;
-
+// --------------------------------------------------------
+// Check if point located in ellipse ROI square 
+// with center in ellipse center and side equals to ellipse
+// long axis.
+// --------------------------------------------------------
+bool inline pointInellipseRoi(cv::Mat& ellipse, cv::Vec2d& point, double distance_tolerance)
+{
+    double cx = ellipse.at<double>(0);
+    double cy = ellipse.at<double>(1);
+    double a = ellipse.at<double>(2);
+    if (point[0] >= (cx - a - distance_tolerance) &&
+        point[0] <= (cx + a + distance_tolerance) &&
+        point[1] >= (cy - a - distance_tolerance) &&
+        point[1] <= (cy + a + distance_tolerance))
+    {
+        return true;
+    }
+    return false;
+}
+// --------------------------------------------------------
+//
+// --------------------------------------------------------
+void updateInlierPts(std::vector<cv::Vec2d>& srcPts, std::vector<size_t>& inlier_idxs, std::vector<cv::Vec2d>& inlierPts)
+{
+    std::vector<cv::Vec2d> tmpPts;
+    tmpPts.assign(srcPts.begin(), srcPts.end());
+    inlierPts.clear();
+    for (auto inl : inlier_idxs)
+    {
+        inlierPts.push_back(tmpPts[inl]);
+    }
+}
+// --------------------------------------------------------
+//
+// --------------------------------------------------------
 void  generateEllipseCandidates(
     cv::Mat& I, // input grayscale 8 bit image
     int edge_process_select, // edge detector: 1 - sobel, 2 - canny  
@@ -89,7 +120,7 @@ void computePointAngle(cv::Mat& ellipse,
 // ----------------------------------------------------
 // Matrix-Matrix dot product
 // ----------------------------------------------------
-void dot(cv::Mat& A, cv::Mat& B, Mat& Res)
+void dot(cv::Mat& A, cv::Mat& B, cv::Mat& Res)
 {
     Res = cv::Mat(A.rows, 1, CV_64FC1);
     for (int i = 0; i < A.rows; ++i)
@@ -120,18 +151,15 @@ void histc(std::vector<size_t>& tt, size_t tbins, std::vector<size_t>& h)
 // ----------------------------------------------------
 void takeInliers(std::vector<cv::Vec2d>& x, cv::Vec2d& center, float tbins, std::vector<size_t>& idx)
 {
-    std::vector<double> theta(x.size());
-    for (int i = 0; i < x.size(); ++i)
+    const double tmin = -CV_PI;
+    const double tmax = CV_PI;
+    double divisor = (tmax - tmin) * (tbins - 1);
+    std::vector<size_t> bin_number;
+    for (auto p : x)
     {
-        theta[i] = atan2(x[i][1] - center[1], x[i][0] - center[0]);
-    }
-    double tmin = -CV_PI;
-    double tmax = CV_PI;
-    std::vector<size_t> bin_number(x.size());
-    for (int i = 0; i < theta.size(); ++i)
-    {
-        // bin number for x[i] normalized to range [0:tbins-1]
-        bin_number[i] = round((theta[i] - tmin) / (tmax - tmin) * (tbins - 1));
+        // bin numbers for x[i] normalized to range [0:tbins-1]
+        auto th = atan2(p[1] - center[1], p[0] - center[0]);
+        bin_number.push_back(round((th - tmin) / divisor));
     }
     // compute histogram of normal angles distribution
     std::vector<size_t> histogram;
@@ -142,7 +170,7 @@ void takeInliers(std::vector<cv::Vec2d>& x, cv::Vec2d& center, float tbins, std:
     std::vector<size_t> compSize(tbins, 0);
     // number of components
     int nComps = 0;
-    // compute components
+    // compute components (continous sectors)
     std::vector<size_t>  queue(tbins, 0);
     const double du[2] = { -1, 1 };
     size_t front = 0;
@@ -201,43 +229,39 @@ void takeInliers(std::vector<cv::Vec2d>& x, cv::Vec2d& center, float tbins, std:
         }
     }
 
-    size_t maxCompSize = 0;
     // as components indexing start from 1 we need to add 1 to size
     compSize.resize(nComps + 1);
     if (nComps > 0)
     {
-        maxCompSize = *std::max_element(compSize.begin(), compSize.end());
-        if (maxCompSize > 10)
+        std::vector<size_t> validComps;
+        for (int j = 0; j < compSize.size(); ++j)
         {
-            std::vector<size_t> validComps;
-            for (int j = 0; j < compSize.size(); ++j)
+            // if component is not empty, it is valid 
+            if (compSize[j] >= 5)
             {
-                if (compSize[j] > 0)
+                validComps.push_back(j);
+            }
+        }
+        std::vector<size_t> validBins;
+        for (int j = 0; j < component_label.size(); ++j)
+        {
+            for (int k = 0; k < validComps.size(); ++k)
+            {
+                if (component_label[j] == validComps[k])
                 {
-                    validComps.push_back(j);
+                    validBins.push_back(j);
                 }
             }
-            std::vector<size_t> validBins;
-            for (int j = 0; j < component_label.size(); ++j)
-            {
-                for (int k = 0; k < validComps.size(); ++k)
-                {
-                    if (component_label[j] == validComps[k])
-                    {
-                        validBins.push_back(j);
-                    }
-                }
-            }
+        }
 
-            idx.clear();
-            for (int k = 0; k < validBins.size(); ++k)
-            {
+        idx.clear();
+        for (int k = 0; k < validBins.size(); ++k)
+        {
             for (int j = 0; j < bin_number.size(); ++j)
+            {
+                if (bin_number[j] == validBins[k])
                 {
-                    if (bin_number[j] == validBins[k])
-                    {
-                        idx.push_back(j);
-                    }
+                    idx.push_back(j);
                 }
             }
         }
@@ -295,7 +319,9 @@ void fitEllipse(std::vector<cv::Vec2d>& points, cv::Mat& ellipse, int& info)
     info = fitEllipse((point2d*)points.data(), points.size(), (double*)ellipse.data);
 }
 
-
+// ----------------------------------------------------
+// 
+// ----------------------------------------------------
 void subEllipseDetection(cv::Mat& list, // N x 5
     std::vector<cv::Vec2d>& points,
     cv::Mat& normals,
@@ -327,36 +353,24 @@ void subEllipseDetection(cv::Mat& list, // N x 5
         cv::Vec2d ellipseCenter(list.at<double>(i, 0), list.at<double>(i, 1));
         cv::Vec2d ellipseAxes(list.at<double>(i, 2), list.at<double>(i, 3));;
         double ellipsePhi = list.at<double>(i, 4);
+        
         //ellipse circumference is approximate pi * (1.5*sum(ellipseAxes)-sqrt(ellipseAxes(1)*ellipseAxes(2))
-        double tbins = min(180.0, floor(CV_PI * (1.5 * (ellipseAxes[0] + ellipseAxes[1]) - sqrt(ellipseAxes[0] * ellipseAxes[1])) * Tmin));
+        double tbins = std::min(180.0, floor(CV_PI * (1.5 * (ellipseAxes[0] + ellipseAxes[1]) - sqrt(ellipseAxes[0] * ellipseAxes[1])) * Tmin));
         std::vector<size_t> inliers;
+        
+        //i_dx = find(points(:, 1) >= (ellipseCenter(1) - ellipseAxes(1) - distance_tolerance) & points(:, 1) <= (ellipseCenter(1) + ellipseAxes(1) + distance_tolerance) & points(:, 2) >= (ellipseCenter(2) - ellipseAxes(1) - distance_tolerance) & points(:, 2) <= (ellipseCenter(2) + ellipseAxes(1) + distance_tolerance));
         std::vector<size_t> i_dx;
         for (int j = 0; j < points.size(); ++j)
         {
-            if (points[i][0] >= (ellipseCenter[0] - ellipseAxes[0] - distance_tolerance) &&
-                points[i][0] <= (ellipseCenter[0] + ellipseAxes[0] + distance_tolerance) &&
-                points[i][1] >= (ellipseCenter[1] - ellipseAxes[0] - distance_tolerance) &&
-                points[i][1] <= (ellipseCenter[1] + ellipseAxes[0] + distance_tolerance))
-            {
+            if (pointInellipseRoi(list, points[i], 1))
+            {                
                 i_dx.push_back(j);
             }
-        }
-        // ===============================================================================================================================================================       
-        //i_dx = find(points(:, 1) >= (ellipseCenter(1) - ellipseAxes(1) - distance_tolerance) & points(:, 1) <= (ellipseCenter(1) + ellipseAxes(1) + distance_tolerance) & points(:, 2) >= (ellipseCenter(2) - ellipseAxes(1) - distance_tolerance) & points(:, 2) <= (ellipseCenter(2) + ellipseAxes(1) + distance_tolerance));
-
+        }               
         // inliers = i_dx( labels(i_dx) == 0 && (dRosin_square(list(i, :), points(i_dx, :)) <= distance_tolerance_square));
-
-        std::vector<size_t> labels_idx;
-        std::vector<cv::Vec2d> points_idx;
-        for (int j = 0; j < i_dx.size(); j++)
-        {
-            labels_idx.push_back(labels[i_dx[j]]);
-            points_idx.push_back(points[i_dx[j]]);
-        }
-
         for (int j = 0; j < i_dx.size(); ++j)
         {
-            if (labels_idx[j] == 0 && (dRosin_square(list.row(i), points_idx[j]) <= distance_tolerance_square))
+            if (labels[i_dx[j]] == 0 && (dRosin_square(list.row(i), points[i_dx[j]]) <= distance_tolerance_square))
             {
                 inliers.push_back(i_dx[j]);
             }
@@ -371,10 +385,13 @@ void subEllipseDetection(cv::Mat& list, // N x 5
             inlierNormals.at<double>(j, 0) = normals.at<double>(inliers[j], 0);
             inlierNormals.at<double>(j, 1) = normals.at<double>(inliers[j], 1);
         }
+        //current ellipse normals
         computePointAngle(list.row(i), inlierPts, ellipse_normals);
-
+        // filter inliers by normal difference 
         cv::Mat p_dot_temp;
+        // compute cos(delta_angle)
         dot(inlierNormals, ellipse_normals, p_dot_temp);
+        // compute polarity
         size_t p_cnt = 0;
         for (int j = 0; j < p_dot_temp.rows; ++j)
         {
@@ -385,6 +402,7 @@ void subEllipseDetection(cv::Mat& list, // N x 5
         }
 
         std::vector<size_t> inliers_tmp;
+        // negative polarity
         if (p_cnt > inliers.size() * 0.5)
         {
             ellipse_polarity = -1;
@@ -397,6 +415,7 @@ void subEllipseDetection(cv::Mat& list, // N x 5
             }
         }
         else
+        // positive polarity
         {
             ellipse_polarity = 1;
             for (int k = 0; k < inliers.size(); ++k)
@@ -409,23 +428,19 @@ void subEllipseDetection(cv::Mat& list, // N x 5
         }
         std::swap(inliers_tmp, inliers);
         inliers_tmp.clear();
-
+        // ----------------------
         std::vector<size_t> inliers2 = inliers;
         std::vector<size_t> inliers3;
-        //=================================================================================================================================================================        
-        inlierPts.clear();
-        for (int k = 0; k < inliers.size(); ++k)
-        {
-            inlierPts.push_back(points[inliers[k]]);
-        }
-
+        // update inlier points
+        updateInlierPts(points, inliers, inlierPts);        
         std::vector<size_t> idx;
         takeInliers(inlierPts, ellipseCenter, tbins, idx);
-
         for (auto id : idx)
         {
             inliers_tmp.push_back(inliers[id]);
         }
+        std::swap(inliers_tmp, inliers);
+        inliers_tmp.clear();
 
         inlierPts.clear();
         inlierNormals = cv::Mat::zeros(inliers.size(), 2, CV_64FC1);
@@ -434,30 +449,28 @@ void subEllipseDetection(cv::Mat& list, // N x 5
             inlierPts.push_back(points[inliers[k]]);
             inlierNormals.at<double>(k, 0) = normals.at<double>(inliers[k], 0);
             inlierNormals.at<double>(k, 1) = normals.at<double>(inliers[k], 1);
-
         }
+
         cv::Mat new_ellipse(1, 5, CV_64FC1);
         int new_info = 0;
         fitEllipse(inlierPts, new_ellipse, new_info);
-        
+
         if (new_info == 1)
         {
-            if ((  (pow(new_ellipse.at<double>(0) - ellipseCenter[0],2) +
-                    pow(new_ellipse.at<double>(1) - ellipseCenter[1],2)) <= 16 * distance_tolerance_square) &&
-                ((  pow(new_ellipse.at<double>(2) - ellipseAxes[0],2) + pow(new_ellipse.at<double>(3) - ellipseAxes[1],2)) <= 16 * distance_tolerance_square) &&
-                   (fabs(new_ellipse.at<double>(4) - ellipsePhi) <= 0.314159265358979))
+            // if new ellipse is near the same as current one
+            if (((pow(new_ellipse.at<double>(0) - ellipseCenter[0], 2) +
+                pow(new_ellipse.at<double>(1) - ellipseCenter[1], 2)) <= 16 * distance_tolerance_square) &&
+                ((pow(new_ellipse.at<double>(2) - ellipseAxes[0], 2) + pow(new_ellipse.at<double>(3) - ellipseAxes[1], 2)) <= 16 * distance_tolerance_square) &&
+                (fabs(new_ellipse.at<double>(4) - ellipsePhi) <= 0.314159265358979))
             {
                 computePointAngle(new_ellipse, inlierPts, ellipse_normals);
-                
+
                 //i_dx = find(points(:, 1) >= (new_ellipse(1) - new_ellipse(3) - distance_tolerance) & points(:, 1) <= (new_ellipse(1) + new_ellipse(3) + distance_tolerance) & points(:, 2) >= (new_ellipse(2) - new_ellipse(3) - distance_tolerance) & points(:, 2) <= (new_ellipse(2) + new_ellipse(3) + distance_tolerance));
                 i_dx.clear();
                 for (int k = 0; k < points.size(); ++k)
                 {
-                    if (points[k][0] >= (new_ellipse.at<double>(0) - new_ellipse.at<double>(2) - distance_tolerance) &&
-                        points[k][0] <= (new_ellipse.at<double>(0) + new_ellipse.at<double>(2) + distance_tolerance) &&
-                        points[k][1] >= (new_ellipse.at<double>(1) - new_ellipse.at<double>(2) - distance_tolerance) &&
-                        points[k][1] <= (new_ellipse.at<double>(1) + new_ellipse.at<double>(1) + distance_tolerance))
-                    {
+                    if (pointInellipseRoi(new_ellipse, points[k], distance_tolerance))
+                    {                        
                         i_dx.push_back(k);
                     }
                 }
@@ -472,20 +485,20 @@ void subEllipseDetection(cv::Mat& list, // N x 5
                     idxNormals.at<double>(k, 0) = normals.at<double>(i_dx[k], 0);
                     idxNormals.at<double>(k, 1) = normals.at<double>(i_dx[k], 1);
                 }
-                
+
                 computePointAngle(new_ellipse, idxPts, idxNormals);
-                
+
                 std::vector<size_t> newinliers;
 
                 //newinliers = i_dx(idxLabels == 0 &&
                 //            (dRosin_square(new_ellipse, idxPts) <= distance_tolerance_square &&
                 //            ((dot(normals(i_dx, :), ellipse_normals, 2) * (-ellipse_polarity)) >= 0.923879532511287)));
-                
+
                 for (int k = 0; k < i_dx.size(); ++k)
                 {
                     if (idxLabels[k] == 0 &&
-                       dRosin_square(new_ellipse, idxPts[k]) <= distance_tolerance_square//&&
-                       /*(idxNormals.row(k).dot(ellipse_normals.row(k)) * (-ellipse_polarity)) >= 0.923879532511287*/)
+                        dRosin_square(new_ellipse, idxPts[k]) <= distance_tolerance_square &&
+                        (idxNormals.row(k).dot(ellipse_normals.row(k)) * (-ellipse_polarity)) >= 0.923879532511287)
                     {
                         newinliers.push_back(i_dx[k]);
                     }
@@ -494,12 +507,9 @@ void subEllipseDetection(cv::Mat& list, // N x 5
                 cv::Vec2d center;
                 center[0] = new_ellipse.at<double>(0);
                 center[1] = new_ellipse.at<double>(1);
-
-                for (int k = 0; k < newinliers.size(); ++k)
-                {
-                    newinliersPts.push_back(points[newinliers[k]]);
-                }
-
+                updateInlierPts(points, newinliers, newinliersPts);
+ 
+                //newinliers = newinliers(takeInliers(points(newinliers, :), new_ellipse(1:2), tbins));
                 idx.clear();
                 takeInliers(newinliersPts, center, tbins, idx);
                 std::vector<size_t> new_inliers_tmp;
@@ -510,52 +520,76 @@ void subEllipseDetection(cv::Mat& list, // N x 5
                 std::swap(new_inliers_tmp, newinliers);
                 new_inliers_tmp.clear();
 
-                //newinliers = newinliers(takeInliers(points(newinliers, :), new_ellipse(1:2), tbins));
-
                 if (newinliers.size() > inliers.size())
                 {
                     inliers = newinliers;
                     inliers3 = newinliers;
-
+                    updateInlierPts(points, newinliers, newinliersPts);
                     newinliersPts.clear();
-                    for (int k = 0; k < newinliers.size(); ++k)
-                    {
-                        newinliersPts.push_back(points[newinliers[k]]);
-                    }
-
                     int new_new_info = 0;
-                    cv::Mat new_new_ellipse(1,5,CV_64FC1);
+                    cv::Mat new_new_ellipse(1, 5, CV_64FC1);
                     fitEllipse(newinliersPts, new_new_ellipse, new_new_info);
-                    
+
                     if (new_new_info == 1)
                     {
                         new_ellipse = new_new_ellipse.clone();
                     }
-                    //=======================================================================
                 }
-                
             }
         }
         else
         {
             new_ellipse = list.row(i).clone();
         }
-        /*
-        if (inliers.size() >= floor(CV_PI * (1.5 * sum(new_ellipse(3:4)) - sqrt(new_ellipse(3) * new_ellipse(4))) * Tmin))
+        
+        if (inliers.size() >= floor(CV_PI * (1.5 * (new_ellipse.at<double>(2) + new_ellipse.at<double>(3)) -
+            sqrt(new_ellipse.at<double>(2) * new_ellipse.at<double>(3))) * Tmin))
         {
-            convergence(i, :) = new_ellipse;
-            if (any((sqrt(sum((convergence(1 : i - 1, 1 : 2) - repmat(new_ellipse(1:2), i - 1, 1)) . ^ 2, 2)) <= distance_tolerance)
-                && (sqrt(sum((convergence(1 : i - 1, 3 : 4) - repmat(new_ellipse(3:4), i - 1, 1)) . ^ 2, 2)) <= distance_tolerance)
-                && (abs(convergence(1 : i - 1, 5) - repmat(new_ellipse(5), i - 1, 1)) <= 0.314159265358979)))
+            new_ellipse.copyTo(convergence.row(i));
+
+            bool valid = true;
+            for (int k = 0; k < i-1; ++k)
             {
-                validCandidates(i) = false;
+                double dx = convergence.at<double>(k, 0) - new_ellipse.at<double>(0);
+                double dy = convergence.at<double>(k, 1) - new_ellipse.at<double>(1);
+                double da = convergence.at<double>(k, 2) - new_ellipse.at<double>(2);
+                double db = convergence.at<double>(k, 3) - new_ellipse.at<double>(3);
+                double dang = convergence.at<double>(k, 4) - new_ellipse.at<double>(4);
+                if (sqrt(dx * dx + dy * dy) <= distance_tolerance &&
+                    sqrt(da * da + db * db) <= distance_tolerance &&
+                    fabs(dang) <= 0.314159265358979)
+                {
+                    valid = false;
+                    break;
+                }
             }
-            completeOrNot = calcuCompleteness(points(inliers, :), new_ellipse(1:2), tbins) >= angleCoverage;
-            if (new_info == 1 && new_ellipse(3) < maxSemiMajor && new_ellipse(4) < maxSemiMinor && completeOrNot)
+            if (valid)
             {
-                if (all((sqrt(sum((ellipses(:, 1 : 2) - repmat(new_ellipse(1:2), size(ellipses, 1), 1)) . ^ 2, 2)) > distance_tolerance)
-                    || (sqrt(sum((ellipses(:, 3 : 4) - repmat(new_ellipse(3:4), size(ellipses, 1), 1)) . ^ 2, 2)) > distance_tolerance)
-                    || (abs(ellipses(:, 5) - repmat(new_ellipse(5), size(ellipses, 1), 1)) >= 0.314159265358979)))
+                validCandidates.push_back(i);
+            }
+
+            bool completeOrNot = calcuCompleteness(inlierPts, cv::Vec2d(new_ellipse.at<double>(0), new_ellipse.at<double>(1)), tbins) >= angleCoverage;
+
+            if (new_info == 1 && /*new_ellipse.at<double>(2) < maxSemiMajor && new_ellipse.at<double>(3) < maxSemiMinor &&*/ completeOrNot)
+            {
+                valid = true;
+                for (int k = 0; k < i - 1; ++k)
+                {
+                    double dx = convergence.at<double>(k, 0) - new_ellipse.at<double>(0);
+                    double dy = convergence.at<double>(k, 1) - new_ellipse.at<double>(1);
+                    double da = convergence.at<double>(k, 2) - new_ellipse.at<double>(2);
+                    double db = convergence.at<double>(k, 3) - new_ellipse.at<double>(3);
+                    double dang = convergence.at<double>(k, 4) - new_ellipse.at<double>(4);
+                    if (!(sqrt(dx * dx + dy * dy) > distance_tolerance ||
+                        sqrt(da * da + db * db) > distance_tolerance ||
+                        fabs(dang) >= 0.314159265358979))
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                /*
+                if (valid)
                 {
                     labels(inliers) = size(ellipses, 1) + 1;
                     //==================================================================
@@ -567,27 +601,17 @@ void subEllipseDetection(cv::Mat& list, // N x 5
                     ellipses = [ellipses; new_ellipse];
                     validCandidates[i] = false;
                 }
+                */
             }
         }
         else
         {
             validCandidates[i] = false;
         }
-        */
+        
     }
 }
 
-
-void updateInlierPts(std::vector<cv::Vec2d>& srcPts, std::vector<size_t>& inlier_idxs, std::vector<cv::Vec2d>& inlierPts)
-{
-    std::vector<cv::Vec2d> tmpPts;
-    tmpPts.assign(srcPts.begin(), srcPts.end());
-    inlierPts.clear();
-    for (auto inl : inlier_idxs)
-    {
-        inlierPts.push_back(tmpPts[inl]);
-    }
-}
 // ----------------------------------------------------
 // 
 // ----------------------------------------------------
@@ -599,21 +623,18 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
 
     std::vector<size_t> validElls;
     std::vector<std::pair< size_t, float > > ellIndGoodness;
-    vector<double> goodness;
+    std::vector<double> goodness;
     for (int i = 0; i < candidates.rows; ++i)
     {
         // ellipse circumference is approximate pi* (1.5 * sum(ellipseAxes) - sqrt(ellipseAxes(1) * ellipseAxes(2))
         cv::Vec2d ellipseCenter(candidates.at<double>(i, 0), candidates.at<double>(i, 1));
         cv::Vec2d ellipseAxes(candidates.at<double>(i, 2), candidates.at<double>(i, 3));
-        double tbins = min(180.0, floor(CV_PI * (1.5 * (ellipseAxes[0] + ellipseAxes[1]) - sqrt(ellipseAxes[0] * ellipseAxes[1])) * Tmin));
+        double tbins = std::min(180.0, floor(CV_PI * (1.5 * (ellipseAxes[0] + ellipseAxes[1]) - sqrt(ellipseAxes[0] * ellipseAxes[1])) * Tmin));
         std::vector<size_t> s_dx;
 
         for (int j = 0; j < points.size(); ++j)
         {
-            if (points[j][0] >= (ellipseCenter[0] - ellipseAxes[0] - 1) &&
-                points[j][0] <= (ellipseCenter[0] + ellipseAxes[0] + 1) &&
-                points[j][1] >= (ellipseCenter[1] - ellipseAxes[0] - 1) &&
-                points[j][1] <= (ellipseCenter[1] + ellipseAxes[0] + 1))
+            if (pointInellipseRoi(candidates.row(i), points[j], 1))
             {
                 s_dx.push_back(j);
             }
@@ -653,8 +674,8 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
             float ny1 = inliers_normals.at<double>(i, 1) * 10;
             cv::Point p2(inlierPts[i][0] + nx, inlierPts[i][1] + ny);
             cv::Point p21(inlierPts[i][0] + nx1, inlierPts[i][1] + ny1);
-            line(global_dbg_img, p1, p2, Scalar(255, 255, 0));
-            line(global_dbg_img, p1, p21, Scalar(255, 0, 255));
+            cv::line(global_dbg_img, p1, p2, cv::Scalar(255, 255, 0));
+            cv::line(global_dbg_img, p1, p21, cv::Scalar(255, 0, 255));
         }
         cv::Mat p_dot_temp;
         dot(inliers_normals, ellipse_normals, p_dot_temp);
@@ -702,7 +723,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
         takeInliers(inlierPts, ellipseCenter, tbins, idx);
         std::cout << "inlierPts " << i << " : " << inlierPts.size() << std::endl;
         std::cout << "idx " << i << " : " << idx.size() << std::endl;
-        for (auto id:idx)
+        for (auto id : idx)
         {
             inliers_tmp.push_back(inliers[id]);
         }
@@ -730,7 +751,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
         goodness.push_back(ellIndGoodness[i].second);
         validElls.push_back(ellIndGoodness[i].first);
         candidates.row(ellIndGoodness[i].first).copyTo(ellipses.row(i));
-        std::cout << ellIndGoodness[i].first <<" : "<< ellIndGoodness[i].second << std::endl;
+        std::cout << ellIndGoodness[i].first << " : " << ellIndGoodness[i].second << std::endl;
     }
     candidates = ellipses.clone();
     // candidates now sorted by goodness
@@ -746,7 +767,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
         double ang = candidates.at<double>(ei, 4) * 180 / CV_PI;
         if (a1 > 0 && a2 > 0)
         {
-            cv::ellipse(E, cv::Point(x, y), cv::Size(a1, a2), ang, 0, 360, (Scalar(255, 0, 0)), 2);
+            cv::ellipse(E, cv::Point(x, y), cv::Size(a1, a2), ang, 0, 360, (cv::Scalar(255, 0, 0)), 2);
         }
     }
     cv::imshow("E", E);
@@ -795,13 +816,14 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
         std::vector<size_t> L2;
         std::vector<size_t> L;
         cv::Mat C; // N x 5
-        std::vector<size_t> validCandidates;        
+        std::vector<size_t> validCandidates;
         //[L2, L, C, validCandidates] = subEllipseDetection(candidates, points(idx, :), normals(idx, :), distance_tolerance, normal_tolerance, Tmin, angles(angleLoop), E, angleLoop);
-        subEllipseDetection(candidates, idxPts, idx_normals, distance_tolerance, normal_tolerance, Tmin, angles[angleLoop], E, anglesLoop, L2, L, C, validCandidates);        
         
+        subEllipseDetection(candidates, idxPts, idx_normals, distance_tolerance, normal_tolerance, Tmin, angles[angleLoop], E, anglesLoop, L2, L, C, validCandidates);
+
         /*
         candidates = candidates(validCandidates, :);
-        
+
         // size(candidates)
         // disp(angleLoop)
         if (size(C, 1) > 0)
@@ -832,7 +854,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
                     ellipses = [ellipses; C(i, :)];
                 }
             }
-            
+
         }
         */
     }
@@ -914,7 +936,7 @@ void ellipseDetectionByArcSupportLSs(cv::Mat& I, float Tac, float Tr, float spec
 
 int main(int argc, char* argv[])
 {
-    Mat image = cv::imread("../../pics/27.jpg", 1);
+    cv::Mat image = cv::imread("../../pics/27.jpg", 1);
 
     cv::cvtColor(image, image, cv::COLOR_BGR2GRAY);
 
