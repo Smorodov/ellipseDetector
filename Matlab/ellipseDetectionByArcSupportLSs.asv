@@ -160,8 +160,7 @@ function [mylabels,labels, ellipses, validCandidates] = subEllipseDetection( lis
     maxSemiMinor = min(max_dis);
     distance_tolerance_square = distance_tolerance*distance_tolerance;
     validCandidates = true(size(list, 1), 1);%logical向量，大小 candidate_n x 1
-    convergence = list;
-    angleCoverage
+    convergence = list;%候选椭圆副本
     for i = 1 : size(list, 1)
         ellipseCenter = list(i, 1 : 2);
         ellipseAxes = list(i, 3:4);
@@ -192,8 +191,7 @@ function [mylabels,labels, ellipses, validCandidates] = subEllipseDetection( lis
                 && (abs(new_ellipse(5) - ellipsePhi) <= 0.314159265358979) )
                 i_dx = find( points(:,1) >= (new_ellipse(1)-new_ellipse(3)-distance_tolerance) & points(:,1) <= (new_ellipse(1)+new_ellipse(3)+distance_tolerance) & points(:,2) >= (new_ellipse(2)-new_ellipse(3)-distance_tolerance) & points(:,2) <= (new_ellipse(2)+new_ellipse(3)+distance_tolerance));
                 ellipse_normals = computePointAngle(new_ellipse,points(i_dx,:));
-                cosang=dot(normals(i_dx,:), ellipse_normals, 2);
-                newinliers = i_dx(labels(i_dx) == 0 & (dRosin_square(new_ellipse,points(i_dx,:)) <= distance_tolerance_square & ((cosang*(-ellipse_polarity)) >= 0.923879532511287) ) );
+                newinliers = i_dx(labels(i_dx) == 0 & (dRosin_square(new_ellipse,points(i_dx,:)) <= distance_tolerance_square & ((dot(normals(i_dx,:), ellipse_normals, 2)*(-ellipse_polarity)) >= 0.923879532511287) ) );
                 newinliers = newinliers(takeInliers(points(newinliers, :), new_ellipse(1:2), tbins));
                 if (length(newinliers) > length(inliers))
                     inliers = newinliers;
@@ -216,9 +214,8 @@ function [mylabels,labels, ellipses, validCandidates] = subEllipseDetection( lis
                 & (abs(convergence(1 : i - 1, 5) - repmat(new_ellipse(5), i - 1, 1)) <= 0.314159265358979) ))
                 validCandidates(i) = false;
             end
-            completeness=calcuCompleteness(points(inliers,:),new_ellipse(1:2),tbins);
-            completeOrNot = completeness >= angleCoverage;
-            if (new_info == 1 && completeOrNot )
+            completeOrNot = calcuCompleteness(points(inliers,:),new_ellipse(1:2),tbins) >= angleCoverage;
+            if (new_info == 1 && new_ellipse(3) < maxSemiMajor && new_ellipse(4) < maxSemiMinor && completeOrNot )
                 if (all( (sqrt(sum((ellipses(:, 1 : 2) - repmat(new_ellipse(1:2), size(ellipses, 1), 1)) .^ 2, 2)) > distance_tolerance) ...
                    | (sqrt(sum((ellipses(:, 3 : 4) - repmat(new_ellipse(3:4), size(ellipses, 1), 1)) .^ 2, 2)) > distance_tolerance) ...
                    | (abs(ellipses(:, 5) - repmat(new_ellipse(5), size(ellipses, 1), 1)) >= 0.314159265358979 ) )) %0.1 * pi = 0.314159265358979 = 18°
@@ -236,7 +233,6 @@ function [mylabels,labels, ellipses, validCandidates] = subEllipseDetection( lis
             validCandidates(i) = false;
         end
     end %for
-    find(validCandidates)
 end%fun
 
 % ================================================================================================================================
