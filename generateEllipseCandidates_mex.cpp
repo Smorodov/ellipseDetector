@@ -76,7 +76,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 	{
 		mexErrMsgIdAndTxt("MATLAB:revord:invalidNumInputs", "One input required.");
 	}
-	else if (nlhs > 4)
+	else if (nlhs > 3)
 	{
 		mexErrMsgIdAndTxt("MATLAB:revord:maxlhs", "Too many output arguments.");
 	}
@@ -187,32 +187,6 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 		 }
 	 }
 	 //---------------------------------------------------------------------
-      if (nlhs == 4)
-      {
-          cv::Mat ls_mat = cv::Mat::zeros(imgy, imgx, CV_8UC1);
-          for (int i = 0; i < n; i++)//draw lines
-          {
-			  cv::Point2d p1(out[8 * i], out[8 * i + 1]), p2(out[8 * i + 2], out[8 * i + 3]);
-			  cv::line(ls_mat, p1, p2, cv::Scalar(255, 0, 0));
-          }
-          if (candidates_num > 0)//draw ellipses
-          {
-              for (int i = 0; i < candidates_num; i++)
-              {
-				  cv::ellipse(ls_mat, cv::Point((int)candidates_out[i * 5], (int)candidates_out[i * 5 + 1]), cv::Size(candidates_out[i * 5 + 2], candidates_out[i * 5 + 3]), candidates_out[i * 5 + 4] * 180 / M_PI, 0, 360, (cv::Scalar(255, 0, 0)), 1);
-              }
-          }
-          plhs[3] = mxCreateDoubleMatrix(imgy, imgx, mxREAL);
-          double* ls_img_out = (double*)mxGetPr(plhs[3]);
-          //memcpy(ls_out_mat,ls_mat.data ,sizeof(unsigned char)*M*N);
-          for (int i = 0; i < imgx; i++)
-          {
-              for (int j = 0; j < imgy; j++)
-              {
-                  ls_img_out[i * imgy + j] = ls_mat.data[j * imgx + i];
-              }
-          }
-	}
 	//---------------------------------------------------------------------
 	free(data);
 	free(coverages);

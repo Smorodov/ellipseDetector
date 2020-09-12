@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <set>
 #include <vector>
+#include <chrono>
 
-cv::Mat global_dbg_img;
 // --------------------------------------------------------
 // Check if point located in ellipse ROI square 
 // with center in ellipse center and side equals to ellipse
@@ -47,8 +47,8 @@ void  generateEllipseCandidates(
     int specified_polarity, // 1 - ellipse lighter than background, -1 - ellipse darker than background
     cv::Mat& candidates_out, // ellipse candidates n x 5 
     cv::Mat& edgeimg_out, // edges image
-    cv::Mat& gradient_vec_out, // gradients for each edge point n x 2
-    cv::Mat& ls_mat); //debug image 
+    cv::Mat& gradient_vec_out); // gradients for each edge point n x 2
+    
 
 // ----------------------------------------------------
 // Point-ellipse edge distance.
@@ -744,6 +744,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
         // Measure angles between ellipse and edge points normals
         // ------------------------------------------------------        
         computePointAngle(candidates.row(i), inlierPts, ellipse_normals);
+        /*
         // plot edge points normals
         for (int i = 0; i < inliers.size(); ++i)
         {
@@ -757,6 +758,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
             cv::line(global_dbg_img, p1, p2, cv::Scalar(255, 255, 0));
             cv::line(global_dbg_img, p1, p21, cv::Scalar(255, 0, 255));
         }
+        */
         cv::Mat p_dot_temp;
         dot(inliers_normals, ellipse_normals, p_dot_temp);
         size_t p_cnt = 0;
@@ -888,19 +890,19 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
 
         //candidates = candidates(validCandidates, :);
         
-        std::cout << "C.size" << std::endl;
-        std::cout << C.rows << std::endl;
+        //std::cout << "C.size" << std::endl;
+        //std::cout << C.rows << std::endl;
         
         // prepare candidates for nexl iteration
         int cnt_v = 0;
         std::vector<size_t> validIdx;        
-        std::cout << "validIdx" << std::endl;
+        //std::cout << "validIdx" << std::endl;
         for (auto v : validCandidates)
         {
             if (v)
             {
                 validIdx.push_back(cnt_v);
-                std::cout << cnt_v << std::endl;
+                //std::cout << cnt_v << std::endl;
             }
             cnt_v++;
         }        
@@ -989,27 +991,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
                 }
             }
         }
-    }
-
-    // plot ellipses
-    if (E.channels() == 1)
-    {
-        cv::cvtColor(E, E, cv::COLOR_GRAY2BGR);
-    }
-    for (int ei = 0; ei < ellipses.rows; ei++)
-    {
-        int x = (int)ellipses.at<double>(ei, 0);
-        int y = (int)ellipses.at<double>(ei, 1);
-        int a1 = ellipses.at<double>(ei, 2);
-        int a2 = ellipses.at<double>(ei, 3);
-        double ang = ellipses.at<double>(ei, 4) * 180 / CV_PI;
-        if (a1 > 0 && a2 > 0)
-        {
-            cv::ellipse(E, cv::Point(x, y), cv::Size(a1, a2), ang, 0, 360, (cv::Scalar(255, 0, 0)), 2);
-        }
-    }
-    cv::imshow("E", E);
-
+    } 
 }
 
 
@@ -1027,7 +1009,7 @@ void ellipseDetection(cv::Mat& candidates, std::vector<cv::Vec2d>& points, cv::M
 //    % transactions on pattern analysisand machine intelligence,
 //    % vol. 32, no. 4, pp. 722¨C732, 2010.
 
-void ellipseDetectionByArcSupportLSs(cv::Mat& I,int edge_process_select, float Tac, float Tr, float specified_polarity)
+void ellipseDetectionByArcSupportLSs(cv::Mat& I,int edge_process_select, float Tac, float Tr, float specified_polarity, cv::Mat& ellipses)
 {
     float angleCoverage = Tac;// default 165
     float Tmin = Tr;// default 0.6
@@ -1036,16 +1018,14 @@ void ellipseDetectionByArcSupportLSs(cv::Mat& I,int edge_process_select, float T
     cv::Mat candidates;
     cv::Mat edge;
     cv::Mat normals;
-    cv::Mat lsimg;
 
     if (I.channels() > 1)
     {
         cv::cvtColor(I, I, cv::COLOR_BGR2GRAY);
     }
     //[candidates, edge, normals, lsimg] = generateEllipseCandidates(I, 2, specified_polarity); // 1, sobel; 2, canny
-    generateEllipseCandidates(I, edge_process_select, specified_polarity, candidates, edge, normals, lsimg);
-    cv::imshow("edge", edge);
-    cv::imshow("lsimg", lsimg);
+    generateEllipseCandidates(I, edge_process_select, specified_polarity, candidates, edge, normals);
+    //cv::imshow("edge", edge);
     candidates = candidates.t();
     if (candidates.at<double>(0) == 0)
     {
@@ -1066,28 +1046,48 @@ void ellipseDetectionByArcSupportLSs(cv::Mat& I,int edge_process_select, float T
             }
         }
     }
-
-    // ellipses = []; L = [];    
-    //[mylabels, labels, ellipses] = ellipseDetection(candidates, [x, y], normals, unit_dis_tolerance, normal_tolerance, Tmin, angleCoverage, I);
     std::vector<size_t> mylabels;
     std::vector<size_t> labels;
-    cv::Mat ellipses;
+
     cv::Mat E = I.clone();
     ellipseDetection(candidates, edgePts, normals, unit_dis_tolerance, normal_tolerance, Tmin, angleCoverage, E, mylabels, labels, ellipses);
-    std::cout << "-----------------------------------------------------------" << std::endl;
 }
 
 int main(int argc, char* argv[])
-{
-    cv::Mat image = cv::imread("../../pics/666.jpg", 1);
+{    
+    cv::Mat image = cv::imread("../../pics/35.jpg", 1);
+    if (image.empty()) { return 0; }
     cv::cvtColor(image, image, cv::COLOR_BGR2GRAY);
-    global_dbg_img = cv::Mat::zeros(image.size(), CV_8UC3);
     cv::imshow("image", image);
     double Tac = 165; // angular coverage
     double Tr = 0.65; // ratio of support inliers on an ellipse
     int polarity = 0; // 0 - both, 1 - interior lighter, -1 - interior darker
-    int edge_process_select = 1; // 1 - sobel, 2 - canny
-    ellipseDetectionByArcSupportLSs(image, edge_process_select, Tac, Tr, polarity);
-    cv::imshow("global_dbg_img", global_dbg_img);
+    int edge_process_select = 2; // 1 - sobel, 2 - canny
+    cv::Mat ellipses;
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    ellipseDetectionByArcSupportLSs(image, edge_process_select, Tac, Tr, polarity,ellipses);    
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    std::cout << "Detection time = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+
+
+    cv::Mat E= image.clone();
+    // plot ellipses
+    if (E.channels() == 1)
+    {
+        cv::cvtColor(E, E, cv::COLOR_GRAY2BGR);
+    }
+    for (int ei = 0; ei < ellipses.rows; ei++)
+    {
+        int x = (int)ellipses.at<double>(ei, 0);
+        int y = (int)ellipses.at<double>(ei, 1);
+        int a1 = ellipses.at<double>(ei, 2);
+        int a2 = ellipses.at<double>(ei, 3);
+        double ang = ellipses.at<double>(ei, 4) * 180 / CV_PI;
+        if (a1 > 0 && a2 > 0)
+        {
+            cv::ellipse(E, cv::Point(x, y), cv::Size(a1, a2), ang, 0, 360, (cv::Scalar(255, 0, 0)), 2);
+        }
+    }
+    cv::imshow("E", E);
     cv::waitKey();
 }

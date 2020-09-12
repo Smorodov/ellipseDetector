@@ -3846,8 +3846,6 @@ int fitEllipse(point2d* dataxy, int datanum, double* ellipara)
 }
 
 
-//input: dataxy为数据点(xi,yi),总共有datanum个
-//output: 拟合矩阵S. 注意：S需要事先申请内存，double S[36].
 inline void calcuFitMatrix(point2d* dataxy, int datanum, double* S)
 {
     double* D = (double*)malloc(datanum * 6 * sizeof(double));
@@ -4826,8 +4824,7 @@ void  generateEllipseCandidates(cv::Mat& I,
     int specified_polarity,
     cv::Mat& candidates_out,
     cv::Mat& edgeimg_out,
-    cv::Mat& gradient_vec_out,
-    cv::Mat& ls_mat)
+    cv::Mat& gradient_vec_out)
 {
     uchar* inputimg = (uchar*)I.data;
     int imgy, imgx;
@@ -4844,8 +4841,8 @@ void  generateEllipseCandidates(cv::Mat& I,
     int n;
     //int new_n;
     std::vector<std::vector<int>> groups;
-    double* coverages;
-    int* reg;
+    double* coverages=nullptr;
+    int* reg = nullptr;
     int reg_x;
     int reg_y;
     double* out = mylsd(&n, data, imgx, imgy, &reg, &reg_x, &reg_y);
@@ -4853,24 +4850,30 @@ void  generateEllipseCandidates(cv::Mat& I,
     free(reg);
     calcuGroupCoverage(out, n, groups, coverages);
 
-    printf("The number of output arc-support line segments: %i\n", n);
-    printf("The number of arc-support groups:%i\n", groups.size());
+    //printf("The number of output arc-support line segments: %i\n", n);
+    //printf("The number of arc-support groups:%i\n", groups.size());
     image_double angles;
     if (edge_process_select == 1)
+    {
+        // sobel
         calculateGradient2(data, imgx, imgy, &angles); //version2, sobel; version 3 canny
+    }
     else
-        calculateGradient3(data, imgx, imgy, &angles); //version2, sobel; version 3 canny
+    {
+        // canny
+        calculateGradient3(data, imgx, imgy, &angles);
+    }
     PairGroupList* pairGroupList;
-    double distance_tolerance = 2;//max( 2.0, 0.005*min(angles->xsize,angles->ysize) ); // 0.005%*min(xsize,ysize)
-    double* candidates; //候选椭圆
-    int  candidates_num = 0;//候选椭圆数量
+    double distance_tolerance = 2;
+    double* candidates; 
+    int  candidates_num = 0;
     //rejectShortLines(out,n,&new_n);
     pairGroupList = getValidInitialEllipseSet(out, n, &groups, coverages, angles, distance_tolerance, specified_polarity);
     if (pairGroupList != NULL)
     {
-        printf("The number of initial ellipses：%i \n", pairGroupList->length);
+        //printf("The number of initial ellipses：%i \n", pairGroupList->length);
         generateEllipseCandidates(pairGroupList, distance_tolerance, candidates, &candidates_num);
-        printf("The number of ellipse candidates: %i \n", candidates_num);
+        //printf("The number of ellipse candidates: %i \n", candidates_num);
         candidates_out = cv::Mat(5, candidates_num, CV_64F);
         for (int i = 0; i < candidates_num; ++i)
         {
@@ -4887,7 +4890,7 @@ void  generateEllipseCandidates(cv::Mat& I,
     }
     else
     {
-        printf("The number of initial ellipses：%i \n", 0);
+        //printf("The number of initial ellipses：%i \n", 0);
         candidates_out = cv::Mat(5, 1, CV_64F);
         candidates_out.at<double>(0) = candidates_out.at<double>(1) = candidates_out.at<double>(2) = candidates_out.at<double>(3) = candidates_out.at<double>(4) = 0;
     }
@@ -4903,7 +4906,9 @@ void  generateEllipseCandidates(cv::Mat& I,
         {
             addr = r * imgx + c;
             if (angles->data[addr] == NOTDEF)
+            {
                 edgeimg_out.at<uchar>(r, c) = 0;
+            }
             else
             {
                 edgeimg_out.at<uchar>(r, c) = 255;
@@ -4913,7 +4918,7 @@ void  generateEllipseCandidates(cv::Mat& I,
             }
         }
     }
-    printf("edge pixel number: %i\n", edge_pixels_total_num);
+    //printf("edge pixel number: %i\n", edge_pixels_total_num);
     gradient_vec_out = cv::Mat(2, edge_pixels_total_num, CV_64FC1);
     for (int c = 0; c < imgx; c++)
     {
@@ -4928,31 +4933,6 @@ void  generateEllipseCandidates(cv::Mat& I,
             }
         }
     }
-    ls_mat = Mat::zeros(imgy, imgx, CV_8UC3);
-    for (int i = 0; i < edge_pixels_total_num; i++)
-    {
-        Point2d p1 = edgePts[i];
-        Point2d p2 = edgePts[i];
-        p2.x += gradient_vec_out.at<double>(0, i) * 10;
-        p2.y += gradient_vec_out.at<double>(1, i) * 10;
-        line(ls_mat, p1, p2, Scalar(255, 255, 0));
-    }
-
-
-    for (int i = 0; i < n; i++)//draw lines
-    {
-        Point2d p1(out[8 * i], out[8 * i + 1]), p2(out[8 * i + 2], out[8 * i + 3]);
-        line(ls_mat, p1, p2, Scalar(0, 255, 255), 2);
-    }
-
-    if (candidates_num > 0)
-    {
-        for (int i = 0; i < candidates_num; i++)
-        {
-            ellipse(ls_mat, cv::Point((int)candidates_out.at<double>(0, i), (int)candidates_out.at<double>(1, i)), cv::Size(candidates_out.at<double>(2, i), candidates_out.at<double>(3, i)), candidates_out.at<double>(4, i) * 180 / M_PI, 0, 360, (Scalar(0, 255, 255)), 2);
-        }
-    }
-
     //---------------------------------------------------------------------
     free(data);
     free(coverages);

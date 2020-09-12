@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 2.8)
 set (CMAKE_CXX_STANDARD 14)
 project(HighQualityEllipseDetector)
 
-set(Matlab_ROOT_DIR "c:/Program Files (x86)/MATLAB/R2016a")
-find_package(Matlab)
 
 #matlab_add_mex(NAME mex_file_name SRC source_file.cpp)
 
@@ -32,6 +30,12 @@ set_target_properties( ${PROJECT_NAME} PROPERTIES  VS_DEBUGGER_WORKING_DIRECTORY
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})
 
+option(BuildMatlabMexs "Build mex functions for MATLAB scripts"  OFF)
+
+if(BuildMatlabMexs)
+set(Matlab_ROOT_DIR "c:/Program Files (x86)/MATLAB/R2016a")
+find_package(Matlab)
+
 set(MEX1_SOURCES
     generateEllipseCandidates_mex.cpp
     generateEllipseCandidates.cpp
@@ -54,3 +58,4 @@ SOURCE_GROUP("Mex Source Files" FILES ${MEX1_SOURCES})
 SOURCE_GROUP("Mex Header Files" FILES ${MEX1_HEADERS})
 matlab_add_mex(NAME fitEllipse SRC ${MEX2_SOURCES})
 target_link_libraries(fitEllipse ${OpenCV_LIBS})
+endif()

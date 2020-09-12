@@ -20,7 +20,7 @@ function [ellipses, L, posi] = ellipseDetectionByArcSupportLSs(I, Tac, Tr, speci
         I = rgb2gray(I);
     end
     % produce ellipse candidates
-    [candidates, edge, normals, lsimg] = generateEllipseCandidates(I, 2, specified_polarity);%1,sobel; 2,canny
+    [candidates, edge, normals] = generateEllipseCandidates(I, 2, specified_polarity);%1,sobel; 2,canny
     t1 = clock;
     disp(['The time of generating ellipse candidates:',num2str(etime(t1,t0))]);
     candidates = candidates';%ellipse candidates matrix Transposition
