@@ -156,12 +156,12 @@ function [mylabels,labels, ellipses, validCandidates] = subEllipseDetection( lis
     mylabels = zeros(size(points, 1), 1);
     ellipses = zeros(0, 5);
     max_dis = max(points) - min(points);
-    maxSemiMajor = max(max_dis);
-    maxSemiMinor = min(max_dis);
+    %maxSemiMajor = max(max_dis);
+    %maxSemiMinor = min(max_dis);
     distance_tolerance_square = distance_tolerance*distance_tolerance;
-    validCandidates = true(size(list, 1), 1);%logical向量，大小 candidate_n x 1
+    validCandidates = true(size(list, 1), 1);
     convergence = list;
-    angleCoverage
+
     for i = 1 : size(list, 1)
         ellipseCenter = list(i, 1 : 2);
         ellipseAxes = list(i, 3:4);

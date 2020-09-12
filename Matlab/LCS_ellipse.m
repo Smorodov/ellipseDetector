@@ -14,7 +14,7 @@ addpath('../build/Release')
 close all;
 
 %image path
-filename = 'pics/27.jpg';
+filename = 'pics/13.jpg';
 
 % parameters
 Tac = 165;
